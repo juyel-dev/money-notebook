@@ -55,10 +55,11 @@ const DB = (() => {
       if (id) {
         const b = cache.notebooks.find(x => x.id === id);
         if (b) { b.name = name; b.startAmount = Number(startAmount) || 0; b.updatedAt = now; }
-      } else {
-        cache.notebooks.push({ id: uid(), name, startAmount: Number(startAmount) || 0, createdAt: now, updatedAt: now });
+        save(); return id;
       }
-      save(); return true;
+      const nid = uid();
+      cache.notebooks.push({ id: nid, name, startAmount: Number(startAmount) || 0, createdAt: now, updatedAt: now });
+      save(); return nid; // returned so UI can navigate straight into the new book
     },
     async deleteBook(id) {
       cache.notebooks = cache.notebooks.filter(b => b.id !== id);

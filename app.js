@@ -8,6 +8,7 @@ const fdate = (iso) => { try { const d = new Date(iso); return d.toLocaleString(
 const toLocalInput = (d = new Date()) => { const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; };
 
 let state = { view: 'home', bookId: null, filter: 'all', search: '', txType: 'out', editBookId: null, editTxId: null };
+let lastPersons = []; // rows currently shown in person list (for tap-to-filter delegation)
 
 const toast = (m) => { const t = $('toast'); t.textContent = m; t.classList.add('show'); clearTimeout(t._x); t._x = setTimeout(() => t.classList.remove('show'), 1800); };
 const openSheet = (id) => $(id).classList.remove('hidden');
@@ -15,23 +16,51 @@ const closeSheets = () => document.querySelectorAll('.sheet-wrap').forEach(s => 
 document.addEventListener('click', e => { if (e.target.closest('[data-close]')) closeSheets(); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSheets(); });
 
-// ---------- navigation ----------
-function go(view, bookId = null) {
+// ---------- navigation (hash-routed: #/ and #/book/{id}) ----------
+// Hash routing makes the phone's system back button work as expected:
+// book → back → books list, instead of closing the installed app.
+function go(view, bookId = null, push = true) {
+  const switchingBook = view === 'book' && bookId !== state.bookId;
   state.view = view; state.bookId = bookId;
+  if (switchingBook) resetBookUI(); // stale search/filter must not leak into another book
   $('view-home').classList.toggle('hidden', view !== 'home');
   $('view-book').classList.toggle('hidden', view !== 'book');
   $('navBack').classList.toggle('hidden', view === 'home');
   $('tabHome').classList.toggle('active', view === 'home');
   $('tabPersons').classList.toggle('active', view === 'book' && !$('personSection').classList.contains('hidden'));
+  $('tabAdd').textContent = view === 'home' ? '＋ New Book' : '＋ Add';
+  if (push) {
+    const h = view === 'book' ? '#/book/' + bookId : '#/';
+    if (location.hash !== h) location.hash = h;
+  }
   if (view === 'home') { $('appTitle').textContent = 'Money Notebook'; $('appSubtitle').textContent = 'offline • fast • simple'; renderHome(); }
   else renderBook();
   window.scrollTo({ top: 0 });
 }
+window.addEventListener('hashchange', () => {
+  const m = location.hash.match(/^#\/book\/([A-Za-z0-9]+)$/);
+  if (m) { if (state.view !== 'book' || state.bookId !== m[1]) go('book', m[1], false); }
+  else if (state.view !== 'home') go('home', null, false);
+});
+function resetBookUI() {
+  state.filter = 'all'; state.search = '';
+  $('searchInput').value = '';
+  syncSeg();
+  $('personSection').classList.add('hidden');
+}
+function syncSeg() {
+  document.querySelectorAll('.seg [data-f]').forEach(x => x.classList.toggle('active', x.dataset.f === state.filter));
+}
+function togglePersons() {
+  const nowHidden = $('personSection').classList.toggle('hidden');
+  $('tabPersons').classList.toggle('active', !nowHidden);
+}
 $('navBack').onclick = () => go('home');
 $('tabHome').onclick = () => go('home');
+$('emptyAddBtn').onclick = () => openBookModal();
 $('tabAdd').onclick = () => state.view === 'home' ? openBookModal() : openTxModal();
-$('tabPersons').onclick = () => { if (state.view !== 'book') return toast('Open a book first'); $('personSection').classList.toggle('hidden'); $('tabPersons').classList.toggle('active', !$('personSection').classList.contains('hidden')); };
-$('personToggle').onclick = () => $('personSection').classList.toggle('hidden');
+$('tabPersons').onclick = () => { if (state.view !== 'book') return toast('Open a book first'); togglePersons(); };
+$('personToggle').onclick = togglePersons;
 $('fab').onclick = () => state.view === 'home' ? openBookModal() : openTxModal();
 
 // ---------- home ----------
@@ -45,19 +74,23 @@ async function renderHome() {
   $('emptyHome').classList.toggle('hidden', books.length > 0);
   $('notebookList').innerHTML = books.map(b => {
     const s = DB.sums(b.id);
-    return `<div class="book glass" onclick="go('book','${b.id}')">
+    return `<div class="book glass" data-book="${b.id}">
       <div class="avatar" style="background:${avStyle(b.name)}">${esc(b.name[0]?.toUpperCase() || '₹')}</div>
       <div class="book-info"><h4>${esc(b.name)}</h4><p>▲ ${fmt(s.in)} &nbsp;•&nbsp; ▼ ${fmt(s.out)} &nbsp;•&nbsp; ${s.count} entries</p></div>
       <div class="book-bal"><strong class="${s.balance < 0 ? 'neg' : 'pos'}">${fmt(s.balance)}</strong><span>balance</span></div>
     </div>`;
   }).join('');
 }
+$('notebookList').onclick = (e) => {
+  const row = e.target.closest('[data-book]');
+  if (row) go('book', row.dataset.book);
+};
 
 // ---------- book detail ----------
 async function renderBook() {
   const books = await DB.listBooks();
   const b = books.find(x => x.id === state.bookId);
-  if (!b) return go('home');
+  if (!b) return go('home'); // book deleted / bad deep link → back to list (also fixes URL hash)
   $('appTitle').textContent = b.name;
   const s = DB.sums(b.id);
   $('appSubtitle').textContent = `${s.count} entries`;
@@ -67,11 +100,11 @@ async function renderBook() {
   $('bookIn').textContent = fmt(s.in);
   $('bookOut').textContent = fmt(s.out);
 
-  // persons
-  const plist = DB.personSummary(b.id);
+  // persons (tap a row to filter entries by that person)
+  lastPersons = DB.personSummary(b.id);
   $('personDatalist').innerHTML = DB.personNames(b.id).map(n => `<option value="${esc(n)}">`).join('');
-  $('personList').innerHTML = plist.length ? plist.map(p => `
-    <div class="prow" onclick="filterPerson('${esc(p.name.replace(/'/g, "\\'"))}')">
+  $('personList').innerHTML = lastPersons.length ? lastPersons.map((p, i) => `
+    <div class="prow" data-pi="${i}">
       <div class="dot" style="background:${avStyle(p.name)}">${esc(p.name[0].toUpperCase())}</div>
       <div><b>${esc(p.name)}</b><small>Gave ${fmt(p.out)} • Got ${fmt(p.in)} • ${p.count} entries</small></div>
       <strong class="${p.net < 0 ? 'neg' : 'pos'}">${p.net < 0 ? '−' + fmt(Math.abs(p.net)) : '+' + fmt(p.net)}</strong>
@@ -91,17 +124,26 @@ async function renderBook() {
   const balMap = {};
   for (const t of ordered) { run += t.type === 'in' ? Number(t.amount) : -Number(t.amount); balMap[t.id] = run; }
   $('txList').innerHTML = txs.length ? txs.map(t => `
-    <div class="tx glass" onclick="openTxModal('${t.id}')">
+    <div class="tx glass" data-tx="${t.id}">
       <div class="tx-ic ${t.type}">${t.type === 'in' ? '▲' : '▼'}</div>
       <div class="tx-info"><b>${esc(t.person)} • ${t.type === 'in' ? 'gave' : 'took'} ${fmt(t.amount)}</b><small>${esc(t.note || '—')} • ${fdate(t.date)}</small></div>
       <div class="tx-amt"><strong class="${t.type === 'in' ? 'pos' : 'neg'}">${t.type === 'in' ? '+' : '−'}₹${esc(Number(t.amount).toLocaleString('en-IN'))}</strong><span>bal ${fmt(balMap[t.id])}</span></div>
     </div>`).join('')
     : `<div class="glass empty"><div class="empty-emoji">🧾</div><h3>No entries</h3><p>Tap + to add gave / got money.</p></div>`;
 }
-window.filterPerson = (name) => { state.search = name; $('searchInput').value = name; renderBook(); };
+$('personList').onclick = (e) => {
+  const row = e.target.closest('[data-pi]');
+  if (!row) return;
+  const p = lastPersons[+row.dataset.pi];
+  if (!p) return;
+  state.search = p.name; $('searchInput').value = p.name; renderBook();
+};
+$('txList').onclick = (e) => {
+  const row = e.target.closest('[data-tx]');
+  if (row) openTxModal(row.dataset.tx);
+};
 document.querySelectorAll('.seg [data-f]').forEach(btn => btn.onclick = () => {
-  document.querySelectorAll('.seg [data-f]').forEach(x => x.classList.remove('active'));
-  btn.classList.add('active'); state.filter = btn.dataset.f; renderBook();
+  state.filter = btn.dataset.f; syncSeg(); renderBook();
 });
 $('searchInput').addEventListener('input', e => { state.search = e.target.value; renderBook(); });
 $('bookMenuBtn').onclick = () => openSheet('menuModal');
@@ -123,6 +165,7 @@ window.openBookModal = async (id = null) => {
   $('deleteBookBtn').classList.toggle('hidden', !id);
   if (id) {
     const b = (await DB.listBooks()).find(x => x.id === id);
+    if (!b) return toast('Book not found');
     $('bookName').value = b.name; $('bookStartAmt').value = b.startAmount;
   } else { $('bookName').value = ''; $('bookStartAmt').value = ''; }
   openSheet('bookModal'); setTimeout(() => $('bookName').focus(), 150);
@@ -130,24 +173,28 @@ window.openBookModal = async (id = null) => {
 $('saveBookBtn').onclick = async () => {
   const name = $('bookName').value.trim();
   if (!name) return toast('Enter notebook name');
-  await DB.saveBook({ id: state.editBookId, name, startAmount: $('bookStartAmt').value });
-  closeSheets(); toast('Notebook saved'); go('home');
+  const editing = !!state.editBookId;
+  const id = await DB.saveBook({ id: state.editBookId, name, startAmount: $('bookStartAmt').value });
+  closeSheets();
+  if (editing && state.view === 'book') { toast('Notebook updated'); renderBook(); } // stay in book after edit
+  else { toast(editing ? 'Notebook updated' : 'Notebook created'); go('book', id || state.editBookId); } // open new book directly
 };
 $('deleteBookBtn').onclick = async () => { if (!confirm('Delete this book + all entries?')) return; await DB.deleteBook(state.editBookId); closeSheets(); toast('Deleted'); go('home'); };
 $('delBookBtn2').onclick = async () => { if (!confirm('Delete this book + all entries?')) return; await DB.deleteBook(state.bookId); closeSheets(); toast('Deleted'); go('home'); };
 
 // ---------- transaction modal ----------
 window.openTxModal = async (txId = null) => {
-  if (!state.bookId && state.view === 'book') return;
-  if (state.view === 'home') { toast('Open a book first'); return; }
+  if (state.view !== 'book' || !state.bookId) { toast('Open a book first'); return; }
+  const books = await DB.listBooks();
+  const b = books.find(x => x.id === state.bookId);
+  if (!b) return go('home');
   state.editTxId = txId;
   $('txModalTitle').textContent = txId ? 'Edit Entry' : 'New Entry';
   $('deleteTxBtn').classList.toggle('hidden', !txId);
-  const books = await DB.listBooks();
-  const b = books.find(x => x.id === state.bookId);
   $('personDatalist').innerHTML = DB.personNames(b.id).map(n => `<option value="${esc(n)}">`).join('');
   if (txId) {
     const t = (await DB.listTx(b.id)).find(x => x.id === txId);
+    if (!t) return toast('Entry not found');
     setTxType(t.type); $('txAmount').value = t.amount; $('txPerson').value = t.person;
     $('txNote').value = t.note || ''; $('txDate').value = toLocalInput(new Date(t.date));
   } else {
@@ -167,7 +214,6 @@ $('typeIn').onclick = () => setTxType('in');
 $('typeOut').onclick = () => setTxType('out');
 $('txAmount').addEventListener('input', updatePreview);
 function updatePreview() {
-  const books0 = true;
   DB.listBooks().then(books => {
     const b = books.find(x => x.id === state.bookId); if (!b) return;
     const s = DB.sums(b.id);
@@ -191,5 +237,10 @@ let deferredPrompt = null;
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredPrompt = e; $('installBtn').classList.remove('hidden'); });
 $('installBtn').onclick = async () => { if (!deferredPrompt) return; deferredPrompt.prompt(); deferredPrompt = null; $('installBtn').classList.add('hidden'); };
 
-// ---------- boot ----------
-go('home');
+// ---------- boot (deep-link aware) ----------
+(() => {
+  if (!location.hash) history.replaceState(null, '', '#/');
+  const m = location.hash.match(/^#\/book\/([A-Za-z0-9]+)$/);
+  if (m) go('book', m[1], false);
+  else go('home', null, false);
+})();
