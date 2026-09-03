@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+<title>Money Notebook — Simple Khata</title>
+<meta name="description" content="Ultra-simple offline money notebook. Multiple notebooks, auto balance, person-wise totals. ₹ INR." />
+<meta name="theme-color" content="#0f172a" />
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="icon" type="image/svg+xml" href="icons/icon.svg" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="MoneyBook" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="bg-blobs" aria-hidden="true"><span class="b1"></span><span class="b2"></span><span class="b3"></span></div>
+
+<div class="phone">
+  <!-- App Bar -->
+  <header class="appbar glass">
+    <div id="navBack" class="nav-back hidden">‹</div>
+    <div class="brand">
+      <div class="logo">₹</div>
+      <div>
+        <h1 id="appTitle">Money Notebook</h1>
+        <p id="appSubtitle">offline • fast • simple</p>
+      </div>
+    </div>
+    <button id="installBtn" class="icon-btn hidden" aria-label="Install app">⤓</button>
+  </header>
+
+  <main id="view-home" class="view">
+    <section class="glass hero">
+      <p class="label">TOTAL BALANCE • ALL BOOKS</p>
+      <h2 id="grandBalance">₹0</h2>
+      <div class="hero-row">
+        <div class="pill in"><span>▲ In</span><strong id="grandIn">₹0</strong></div>
+        <div class="pill out"><span>▼ Out</span><strong id="grandOut">₹0</strong></div>
+      </div>
+    </section>
+
+    <div class="section-head">
+      <h3>My Notebooks</h3>
+      <span id="bookCount" class="count">0</span>
+    </div>
+    <div id="notebookList" class="stack"></div>
+
+    <div id="emptyHome" class="glass empty hidden">
+      <div class="empty-emoji">📒</div>
+      <h3>No notebook yet</h3>
+      <p>Create your first book — e.g. Shop, Home, Loan.</p>
+      <button class="btn primary" onclick="openBookModal()">+ New Notebook</button>
+    </div>
+    <div style="height:110px"></div>
+  </main>
+
+  <main id="view-book" class="view hidden">
+    <section class="glass balance-card">
+      <div class="bal-top">
+        <div>
+          <p class="label">CURRENT BALANCE</p>
+          <h2 id="bookBalance">₹0</h2>
+        </div>
+        <button id="bookMenuBtn" class="icon-btn">⋯</button>
+      </div>
+      <div class="bal-grid">
+        <div><span>Start</span><strong id="bookStart">₹0</strong></div>
+        <div class="t-in"><span>▲ In</span><strong id="bookIn">₹0</strong></div>
+        <div class="t-out"><span>▼ Out</span><strong id="bookOut">₹0</strong></div>
+      </div>
+      <div class="seg">
+        <button data-f="all" class="active">All</button>
+        <button data-f="in">In</button>
+        <button data-f="out">Out</button>
+        <button id="personToggle">👥 Persons</button>
+      </div>
+      <input id="searchInput" class="search" type="search" placeholder="Search name, note, amount…" autocomplete="off" />
+    </section>
+
+    <section id="personSection" class="glass hidden">
+      <h4>Person-wise total</h4>
+      <div id="personList" class="stack small"></div>
+    </section>
+
+    <div class="section-head">
+      <h3>Entries</h3>
+      <span id="txCount" class="count">0</span>
+    </div>
+    <div id="txList" class="stack"></div>
+    <div style="height:110px"></div>
+  </main>
+
+  <!-- FAB -->
+  <button id="fab" class="fab" aria-label="Add">+</button>
+
+  <!-- Bottom nav hint -->
+  <nav class="tabbar glass">
+    <button id="tabHome" class="active">📒 Books</button>
+    <button id="tabAdd">＋ Add</button>
+    <button id="tabPersons">👥 Persons</button>
+  </nav>
+
+  <!-- Notebook modal -->
+  <div id="bookModal" class="sheet-wrap hidden">
+    <div class="backdrop" data-close></div>
+    <div class="sheet glass-strong">
+      <div class="grab"></div>
+      <h3 id="bookModalTitle">New Notebook</h3>
+      <label>Notebook name
+        <input id="bookName" maxlength="40" placeholder="e.g. Shop Khata" />
+      </label>
+      <label>Starting amount (₹)
+        <input id="bookStartAmt" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" />
+      </label>
+      <div class="row">
+        <button class="btn ghost" data-close>Cancel</button>
+        <button class="btn primary" id="saveBookBtn">Save Book</button>
+      </div>
+      <button id="deleteBookBtn" class="btn danger-text hidden">Delete this book</button>
+    </div>
+  </div>
+
+  <!-- Transaction modal -->
+  <div id="txModal" class="sheet-wrap hidden">
+    <div class="backdrop" data-close></div>
+    <div class="sheet glass-strong">
+      <div class="grab"></div>
+      <h3 id="txModalTitle">New Entry</h3>
+      <div class="type-toggle">
+        <button id="typeOut" class="type out active">− Gave / Out</button>
+        <button id="typeIn" class="type in">+ Got / In</button>
+      </div>
+      <label class="amt-label">Amount (₹)
+        <div class="amt-box"><span>₹</span><input id="txAmount" type="number" inputmode="decimal" min="0.01" step="0.01" placeholder="0.00" /></div>
+      </label>
+      <div class="grid2">
+        <label>Person
+          <input id="txPerson" maxlength="40" placeholder="Name" list="personDatalist" autocomplete="off" />
+          <datalist id="personDatalist"></datalist>
+        </label>
+        <label>Date & time
+          <input id="txDate" type="datetime-local" />
+        </label>
+      </div>
+      <label>Note (optional)
+        <input id="txNote" maxlength="120" placeholder="e.g. tea bill, udhaar…" />
+      </label>
+      <div id="runBalancePreview" class="preview">Balance after this: —</div>
+      <div class="row">
+        <button class="btn ghost" data-close>Cancel</button>
+        <button class="btn primary" id="saveTxBtn">Save</button>
+      </div>
+      <button id="deleteTxBtn" class="btn danger-text hidden">Delete entry</button>
+    </div>
+  </div>
+
+  <!-- Action menu -->
+  <div id="menuModal" class="sheet-wrap hidden">
+    <div class="backdrop" data-close></div>
+    <div class="sheet glass-strong menu">
+      <div class="grab"></div>
+      <button class="menu-item" id="editBookBtn">✏️ Edit book</button>
+      <button class="menu-item" id="exportBookBtn">⤓ Export CSV</button>
+      <button class="menu-item danger" id="delBookBtn2">🗑 Delete book</button>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+</div>
+
+<script src="store.js"></script>
+<script src="supabase-client.js"></script>
+<script src="app.js"></script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(()=>{}));
+}
+</script>
+</body>
+</html>
